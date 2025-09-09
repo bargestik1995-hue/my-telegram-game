@@ -2,13 +2,15 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Flappy Bird - HTML5 версия</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Flappy Bird - Мобильная версия</title>
     <style>
         * {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+            touch-action: manipulation;
         }
         
         body {
@@ -19,12 +21,15 @@
             min-height: 100vh;
             background: linear-gradient(to bottom, #1a237e, #4a148c);
             overflow: hidden;
+            touch-action: manipulation;
         }
         
         #game-container {
             position: relative;
-            width: 320px;
-            height: 480px;
+            width: 100%;
+            max-width: 320px;
+            height: 100vh;
+            max-height: 480px;
             overflow: hidden;
             border-radius: 10px;
             box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
@@ -33,6 +38,8 @@
         canvas {
             background-color: #70c5ce;
             display: block;
+            width: 100%;
+            height: 100%;
         }
         
         #score {
@@ -62,6 +69,7 @@
             color: white;
             z-index: 20;
             text-align: center;
+            padding: 20px;
         }
         
         .screen h1 {
@@ -88,6 +96,7 @@
             cursor: pointer;
             box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
             transition: all 0.2s;
+            touch-action: manipulation;
         }
         
         .screen button:hover {
@@ -124,17 +133,70 @@
             font-weight: bold;
             box-shadow: 0 0 15px rgba(255, 215, 0, 0.8);
         }
+        
+        /* Кнопка для прыжка на мобильных устройствах */
+        #jump-button {
+            position: absolute;
+            bottom: 100px;
+            right: 20px;
+            width: 70px;
+            height: 70px;
+            background-color: rgba(255, 87, 34, 0.7);
+            border-radius: 50%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: white;
+            font-size: 16px;
+            font-weight: bold;
+            z-index: 15;
+            border: none;
+            cursor: pointer;
+            touch-action: manipulation;
+            user-select: none;
+        }
+        
+        #jump-button:active {
+            background-color: rgba(255, 87, 34, 1);
+            transform: scale(0.95);
+        }
+        
+        /* Адаптивность для мобильных устройств */
+        @media (max-height: 500px) {
+            #game-container {
+                max-height: 100vh;
+                border-radius: 0;
+            }
+            
+            .screen {
+                border-radius: 0;
+            }
+            
+            #jump-button {
+                bottom: 70px;
+                width: 60px;
+                height: 60px;
+            }
+        }
+        
+        /* Предотвращение выделения текста на мобильных устройствах */
+        .no-select {
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+            user-select: none;
+        }
     </style>
 </head>
-<body>
+<body class="no-select">
     <div id="game-container">
         <canvas id="game-canvas" width="320" height="480"></canvas>
         <div id="score">0</div>
-        <div id="controls">Нажми ПРОБЕЛ или кликни, чтобы прыгнуть</div>
+        <div id="controls">Нажми ПРОБЕЛ, кликни или коснись экрана</div>
         
         <div id="start-screen" class="screen">
             <h1>Flappy Bird</h1>
-            <p>Нажимай ПРОБЕЛ или кликай мышкой, чтобы птица летела. Пролетай между трубами!</p>
+            <p>Нажимай ПРОБЕЛ, кликай мышкой или касайся экрана, чтобы птица летела. Пролетай между трубами!</p>
             <button id="start-button">Начать игру</button>
         </div>
         
@@ -145,6 +207,9 @@
             <p id="high-score-text">Рекорд: <span id="high-score">0</span></p>
             <button id="restart-button">Играть снова</button>
         </div>
+        
+        <!-- Кнопка для прыжка на мобильных устройствах -->
+        <button id="jump-button" class="hidden">Прыжок</button>
     </div>
 
     <script>
@@ -160,6 +225,15 @@
         const highScoreElement = document.getElementById('high-score');
         const highScoreText = document.getElementById('high-score-text');
         const medalElement = document.getElementById('medal');
+        const jumpButton = document.getElementById('jump-button');
+
+        // Определяем, является ли устройство мобильным
+        const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+        
+        // Если устройство мобильное, показываем кнопку прыжка
+        if (isMobile) {
+            jumpButton.classList.remove('hidden');
+        }
 
         // Игровые константы
         const GRAVITY = 0.25;
@@ -447,7 +521,36 @@
         // Обработчики событий
         startButton.addEventListener('click', startGame);
         restartButton.addEventListener('click', startGame);
+        jumpButton.addEventListener('click', function() {
+            if (gameState === 'playing') {
+                bird.flap();
+            }
+        });
 
+        // Обработка сенсорных событий
+        canvas.addEventListener('touchstart', function(e) {
+            if (gameState === 'start') {
+                startGame();
+            } else if (gameState === 'playing') {
+                bird.flap();
+            } else if (gameState === 'gameover') {
+                startGame();
+            }
+            e.preventDefault(); // Предотвращаем стандартное поведение
+        }, { passive: false });
+
+        // Обработка кликов мышью
+        canvas.addEventListener('click', function() {
+            if (gameState === 'start') {
+                startGame();
+            } else if (gameState === 'playing') {
+                bird.flap();
+            } else if (gameState === 'gameover') {
+                startGame();
+            }
+        });
+
+        // Обработка клавиатуры
         document.addEventListener('keydown', function(e) {
             if (e.code === 'Space') {
                 if (gameState === 'start') {
@@ -461,15 +564,47 @@
             }
         });
 
-        canvas.addEventListener('click', function() {
-            if (gameState === 'playing') {
-                bird.flap();
+        // Предотвращение масштабирования на мобильных устройствах
+        document.addEventListener('touchmove', function(e) {
+            if (e.scale !== 1) {
+                e.preventDefault();
             }
+        }, { passive: false });
+
+        // Предотвращение контекстного меню на мобильных устройствах
+        document.addEventListener('contextmenu', function(e) {
+            e.preventDefault();
         });
 
         // Инициализация
         highScoreElement.textContent = highScore;
         draw(); // Первоначальная отрисовка
+
+        // Адаптация размера canvas под экран устройства
+        function resizeCanvas() {
+            const container = document.getElementById('game-container');
+            const containerWidth = container.clientWidth;
+            const containerHeight = container.clientHeight;
+            
+            // Сохраняем соотношение сторон
+            const aspectRatio = 320 / 480;
+            let newWidth, newHeight;
+            
+            if (containerHeight * aspectRatio > containerWidth) {
+                newWidth = containerWidth;
+                newHeight = containerWidth / aspectRatio;
+            } else {
+                newHeight = containerHeight;
+                newWidth = containerHeight * aspectRatio;
+            }
+            
+            canvas.style.width = newWidth + 'px';
+            canvas.style.height = newHeight + 'px';
+        }
+
+        // Вызываем при загрузке и изменении размера окна
+        window.addEventListener('load', resizeCanvas);
+        window.addEventListener('resize', resizeCanvas);
     </script>
 </body>
 </html>
