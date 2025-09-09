@@ -1,0 +1,285 @@
+import os
+import random
+import pygame
+import logging
+from io import BytesIO
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
+
+# Настройка логирования
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
+
+# Константы игры
+SCREEN_WIDTH = 288
+SCREEN_HEIGHT = 512
+GRAVITY = 0.25
+BIRD_JUMP = -7
+PIPE_GAP = 100
+PIPE_FREQUENCY = 1500  # milliseconds
+GROUND_HEIGHT = 100
+
+# Инициализация Pygame
+pygame.init()
+screen = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
+clock = pygame.time.Clock()
+
+# Загрузка ресурсов (здесь просто создаем поверхности для примера)
+def create_surface(width, height, color):
+    surf = pygame.Surface((width, height))
+    surf.fill(color)
+    return surf
+
+# Ресурсы игры
+bird_surfaces = [
+    create_surface(30, 30, (255, 255, 0)),  # Желтая птичка
+    create_surface(30, 30, (255, 200, 0)),
+    create_surface(30, 30, (255, 150, 0))
+]
+pipe_surface = create_surface(50, 300, (0, 128, 0))  # Зеленая труба
+background_surface = create_surface(SCREEN_WIDTH, SCREEN_HEIGHT, (135, 206, 235))  # Голубой фон
+ground_surface = create_surface(SCREEN_WIDTH, GROUND_HEIGHT, (222, 184, 135))  # Бежевая земля
+
+# Состояния игры для каждого пользователя
+user_games = {}
+
+class FlappyBirdGame:
+    def __init__(self):
+        self.reset()
+    
+    def reset(self):
+        self.bird_rect = pygame.Rect(50, SCREEN_HEIGHT // 2, 30, 30)
+        self.bird_movement = 0
+        self.score = 0
+        self.pipes = []
+        self.last_pipe = pygame.time.get_ticks() - PIPE_FREQUENCY
+        self.passed_pipe = False
+        self.game_active = True
+        self.bird_index = 0
+        self.bird_flap = 0
+    
+    def update(self):
+        if not self.game_active:
+            return
+        
+        # Анимация птицы
+        self.bird_flap += 1
+        if self.bird_flap > 5:
+            self.bird_index = (self.bird_index + 1) % len(bird_surfaces)
+            self.bird_flap = 0
+        
+        # Движение птицы
+        self.bird_movement += GRAVITY
+        self.bird_rect.y += self.bird_movement
+        
+        # Генерация труб
+        current_time = pygame.time.get_ticks()
+        if current_time - self.last_pipe > PIPE_FREQUENCY:
+            pipe_height = random.randint(100, 300)
+            bottom_pipe = pipe_surface.get_rect(midtop=(SCREEN_WIDTH + 50, pipe_height))
+            top_pipe = pipe_surface.get_rect(midbottom=(SCREEN_WIDTH + 50, pipe_height - PIPE_GAP))
+            self.pipes.extend([bottom_pipe, top_pipe])
+            self.last_pipe = current_time
+        
+        # Движение труб и проверка столкновений
+        self.passed_pipe = False
+        for pipe in self.pipes[:]:
+            pipe.x -= 2
+            
+            # Проверка прохождения трубы
+            if pipe.right < 50 and not self.passed_pipe and pipe in self.pipes[::2]:
+                self.score += 1
+                self.passed_pipe = True
+            
+            # Удаление труб за экраном
+            if pipe.right < 0:
+                self.pipes.remove(pipe)
+            
+            # Проверка столкновений
+            if pipe.colliderect(self.bird_rect):
+                self.game_active = False
+        
+        # Проверка столкновения с землей или потолком
+        if self.bird_rect.top <= 0 or self.bird_rect.bottom >= SCREEN_HEIGHT - GROUND_HEIGHT:
+            self.game_active = False
+    
+    def jump(self):
+        if self.game_active:
+            self.bird_movement = BIRD_JUMP
+    
+    def draw(self):
+        # Отрисовка фона
+        screen.blit(background_surface, (0, 0))
+        
+        # Отрисовка труб
+        for pipe in self.pipes:
+            screen.blit(pipe_surface, pipe)
+        
+        # Отрисовка земли
+        screen.blit(ground_surface, (0, SCREEN_HEIGHT - GROUND_HEIGHT))
+        
+        # Отрисовка птицы
+        rotated_bird = pygame.transform.rotate(bird_surfaces[self.bird_index], -self.bird_movement * 3)
+        screen.blit(rotated_bird, self.bird_rect)
+        
+        # Отрисовка счета
+        font = pygame.font.SysFont(None, 36)
+        score_text = font.render(f'Score: {self.score}', True, (255, 255, 255))
+        screen.blit(score_text, (10, 10))
+        
+        # Отрисовка сообщения о конце игры
+        if not self.game_active:
+            font = pygame.font.SysFont(None, 48)
+            game_over_text = font.render('Game Over', True, (255, 0, 0))
+            restart_text = font.render('Tap to restart', True, (255, 255, 255))
+            screen.blit(game_over_text, (SCREEN_WIDTH // 2 - game_over_text.get_width() // 2, 
+                                         SCREEN_HEIGHT // 2 - 50))
+            screen.blit(restart_text, (SCREEN_WIDTH // 2 - restart_text.get_width() // 2, 
+                                      SCREEN_HEIGHT // 2 + 10))
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик команды /start"""
+    user_id = update.effective_user.id
+    
+    # Создаем новую игру для пользователя
+    if user_id not in user_games:
+        user_games[user_id] = FlappyBirdGame()
+    
+    # Создаем клавиатуру
+    keyboard = [
+        [InlineKeyboardButton("🔄 Начать игру", callback_data="start_game")],
+        [InlineKeyboardButton("❓ Помощь", callback_data="help")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await update.message.reply_text(
+        "Добро пожаловать в Flappy Bird!\n\n"
+        "Нажмите '🔄 Начать игру', чтобы начать.\n"
+        "Используйте кнопку '🔄 Прыжок', чтобы птица летела.",
+        reply_markup=reply_markup
+    )
+
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик нажатий кнопок"""
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = update.effective_user.id
+    
+    # Инициализация игры для пользователя, если ее нет
+    if user_id not in user_games:
+        user_games[user_id] = FlappyBirdGame()
+    
+    game = user_games[user_id]
+    
+    if query.data == "start_game":
+        game.reset()
+        # Создаем игровую клавиатуру
+        keyboard = [
+            [InlineKeyboardButton("🔄 Прыжок", callback_data="jump")],
+            [InlineKeyboardButton("🔄 Перезапуск", callback_data="restart")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        # Обновляем игровое состояние
+        game.update()
+        
+        # Создаем изображение игры
+        game.draw()
+        
+        # Конвертируем поверхность Pygame в изображение для Telegram
+        img_buffer = BytesIO()
+        pygame.image.save(screen, img_buffer, format='PNG')
+        img_buffer.seek(0)
+        
+        # Отправляем изображение
+        await query.message.reply_photo(
+            photo=img_buffer,
+            caption=f"Игра началась! Текущий счет: {game.score}",
+            reply_markup=reply_markup
+        )
+    
+    elif query.data == "jump":
+        game.jump()
+        game.update()
+        
+        # Создаем изображение игры
+        game.draw()
+        
+        # Конвертируем поверхность Pygame в изображение для Telegram
+        img_buffer = BytesIO()
+        pygame.image.save(screen, img_buffer, format='PNG')
+        img_buffer.seek(0)
+        
+        if game.game_active:
+            # Обновляем сообщение с новым изображением
+            await query.message.reply_photo(
+                photo=img_buffer,
+                caption=f"Текущий счет: {game.score}",
+                reply_markup=query.message.reply_markup
+            )
+        else:
+            # Игра окончена
+            keyboard = [
+                [InlineKeyboardButton("🔄 Перезапуск", callback_data="restart")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await query.message.reply_photo(
+                photo=img_buffer,
+                caption=f"Игра окончена! Финальный счет: {game.score}",
+                reply_markup=reply_markup
+            )
+    
+    elif query.data == "restart":
+        game.reset()
+        game.update()
+        
+        # Создаем изображение игры
+        game.draw()
+        
+        # Конвертируем поверхность Pygame в изображение для Telegram
+        img_buffer = BytesIO()
+        pygame.image.save(screen, img_buffer, format='PNG')
+        img_buffer.seek(0)
+        
+        keyboard = [
+            [InlineKeyboardButton("🔄 Прыжок", callback_data="jump")],
+            [InlineKeyboardButton("🔄 Перезапуск", callback_data="restart")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.message.reply_photo(
+            photo=img_buffer,
+            caption=f"Новая игра! Счет: {game.score}",
+            reply_markup=reply_markup
+        )
+    
+    elif query.data == "help":
+        await query.message.reply_text(
+            "Как играть в Flappy Bird:\n\n"
+            "1. Нажмите '🔄 Начать игру', чтобы начать.\n"
+            "2. Используйте кнопку '🔄 Прыжок', чтобы птица летела.\n"
+            "3. Пролетайте между трубами, не касаясь их.\n"
+            "4. Каждая успешно пройденная труба приносит 1 очко.\n"
+            "5. Если вы коснетесь трубы или земли, игра окончена.\n\n"
+            "Удачи!"
+        )
+
+def main():
+    """Запуск бота"""
+    # Замените 'YOUR_BOT_TOKEN' на токен вашего бота
+    application = Application.builder().token("YOUR_BOT_TOKEN").build()
+    
+    # Добавляем обработчики
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CallbackQueryHandler(button_handler))
+    
+    # Запускаем бота
+    application.run_polling()
+
+if __name__ == "__main__":
+    main()
