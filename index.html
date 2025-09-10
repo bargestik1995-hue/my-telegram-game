@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Flappy Bird - Мобильная версия</title>
+    <title>Flappy Bird - Двойные проходы</title>
     <style>
         * {
             margin: 0;
@@ -196,7 +196,7 @@
         
         <div id="start-screen" class="screen">
             <h1>Flappy Bird</h1>
-            <p>Нажимай ПРОБЕЛ, кликай мышкой или касайся экрана, чтобы птица летела. Пролетай между трубами!</p>
+            <p>Теперь с двойными проходами! Пролетай через верхний или нижний проход.</p>
             <button id="start-button">Начать игру</button>
         </div>
         
@@ -239,8 +239,9 @@
         const GRAVITY = 0.25;
         const FLAP_FORCE = -4.6;
         const PIPE_SPEED = 2;
-        const PIPE_SPAWN_INTERVAL = 1500; // мс
-        const PIPE_GAP = 120;
+        const PIPE_SPAWN_INTERVAL = 1800; // мс
+        const PIPE_GAP = 100; // Высота прохода
+        const PIPE_DOUBLE_GAP = 80; // Расстояние между двумя проходами
         const GROUND_HEIGHT = 80;
 
         // Игровые переменные
@@ -332,46 +333,84 @@
             }
         };
 
-        // Трубы (препятствия)
+        // Трубы с двумя проходами
         let pipes = [];
 
-        function Pipe() {
+        function DoublePipe() {
             this.width = 52;
             this.x = canvas.width;
-            this.topHeight = Math.floor(Math.random() * (canvas.height - PIPE_GAP - GROUND_HEIGHT - 100)) + 50;
-            this.bottomY = this.topHeight + PIPE_GAP;
+            
+            // Генерация позиции для двойных труб
+            // Обеспечиваем, чтобы оба прохода были в пределах видимости
+            const minGap = 60;
+            const maxGap = canvas.height - GROUND_HEIGHT - PIPE_GAP * 2 - PIPE_DOUBLE_GAP - minGap;
+            
+            this.topGapY = minGap + Math.random() * maxGap;
+            this.bottomGapY = this.topGapY + PIPE_GAP + PIPE_DOUBLE_GAP;
+            
+            this.passedTop = false;
+            this.passedBottom = false;
             
             this.draw = function() {
-                // Верхняя труба
+                // Верхняя труба (над верхним проходом)
                 ctx.fillStyle = '#2ecc71';
-                ctx.fillRect(this.x, 0, this.width, this.topHeight);
+                ctx.fillRect(this.x, 0, this.width, this.topGapY);
                 
-                // Нижняя труба
-                ctx.fillRect(this.x, this.bottomY, this.width, canvas.height - this.bottomY - GROUND_HEIGHT);
+                // Средняя труба (между проходами)
+                ctx.fillRect(this.x, this.topGapY + PIPE_GAP, this.width, PIPE_DOUBLE_GAP);
+                
+                // Нижняя труба (под нижним проходом)
+                ctx.fillRect(this.x, this.bottomGapY + PIPE_GAP, this.width, canvas.height - this.bottomGapY - PIPE_GAP - GROUND_HEIGHT);
                 
                 // Шляпки труб
                 ctx.fillStyle = '#27ae60';
-                ctx.fillRect(this.x - 4, this.topHeight - 20, this.width + 8, 20);
-                ctx.fillRect(this.x - 4, this.bottomY, this.width + 8, 20);
+                // Верхняя шляпка
+                ctx.fillRect(this.x - 4, this.topGapY - 20, this.width + 8, 20);
+                // Средняя шляпка (верх)
+                ctx.fillRect(this.x - 4, this.topGapY + PIPE_GAP, this.width + 8, 20);
+                // Средняя шляпка (низ)
+                ctx.fillRect(this.x - 4, this.bottomGapY - 20, this.width + 8, 20);
+                // Нижняя шляпка
+                ctx.fillRect(this.x - 4, this.bottomGapY + PIPE_GAP, this.width + 8, 20);
             };
             
             this.update = function() {
                 this.x -= PIPE_SPEED * gameSpeed;
                 
-                // Проверка прохождения трубы
-                if (this.x + this.width < bird.x && !this.passed) {
+                // Проверка прохождения через верхний проход
+                if (this.x + this.width < bird.x && !this.passedTop) {
                     score++;
                     scoreElement.textContent = score;
-                    this.passed = true;
+                    this.passedTop = true;
                 }
                 
-                // Проверка столкновения
-                if (
-                    bird.x + bird.radius > this.x && 
+                // Проверка прохождения через нижний проход
+                if (this.x + this.width < bird.x && !this.passedBottom) {
+                    score++;
+                    scoreElement.textContent = score;
+                    this.passedBottom = true;
+                }
+                
+                // Проверка столкновений
+                // Столкновение с верхней трубой
+                if (bird.x + bird.radius > this.x && 
                     bird.x - bird.radius < this.x + this.width && 
-                    (bird.y - bird.radius < this.topHeight || 
-                     bird.y + bird.radius > this.bottomY)
-                ) {
+                    bird.y - bird.radius < this.topGapY) {
+                    gameOver();
+                }
+                
+                // Столкновение со средней трубой
+                if (bird.x + bird.radius > this.x && 
+                    bird.x - bird.radius < this.x + this.width && 
+                    bird.y + bird.radius > this.topGapY + PIPE_GAP && 
+                    bird.y - bird.radius < this.bottomGapY) {
+                    gameOver();
+                }
+                
+                // Столкновение с нижней трубой
+                if (bird.x + bird.radius > this.x && 
+                    bird.x - bird.radius < this.x + this.width && 
+                    bird.y + bird.radius > this.bottomGapY + PIPE_GAP) {
                     gameOver();
                 }
             };
@@ -452,7 +491,7 @@
             
             // Создание новых труб
             if (frames % Math.floor(PIPE_SPAWN_INTERVAL / (16.66 * gameSpeed)) === 0) {
-                pipes.push(new Pipe());
+                pipes.push(new DoublePipe());
             }
             
             frames++;
@@ -498,13 +537,13 @@
             
             // Отображение медали
             medalElement.textContent = score;
-            if (score >= 20) {
+            if (score >= 30) {
                 medalElement.style.background = 'radial-gradient(circle at 30% 30%, #ffd700, #daa520)';
                 medalElement.innerHTML = '<span>🥇</span>';
-            } else if (score >= 10) {
+            } else if (score >= 20) {
                 medalElement.style.background = 'radial-gradient(circle at 30% 30%, #c0c0c0, #a9a9a9)';
                 medalElement.innerHTML = '<span>🥈</span>';
-            } else if (score >= 5) {
+            } else if (score >= 10) {
                 medalElement.style.background = 'radial-gradient(circle at 30% 30%, #cd7f32, #8c6b46)';
                 medalElement.innerHTML = '<span>🥉</span>';
             } else {
